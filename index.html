@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>スタレゾモジュール計算機</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111111">
+
+<style>
+body{
+  font-family:sans-serif;
+  background:#111;
+  color:#fff;
+  padding:10px;
+}
+input,select,button{
+  font-size:16px;
+  margin:5px 0;
+  padding:8px;
+}
+button{
+  background:#2196f3;
+  border:none;
+  color:white;
+  border-radius:6px;
+}
+.card{
+  background:#222;
+  padding:10px;
+  margin:10px 0;
+  border-radius:8px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>スタレゾモジュール計算機</h2>
+
+<h3>セーブデータ</h3>
+<select id="saveSlots"></select><br>
+<input type="text" id="saveName" placeholder="保存名">
+<button onclick="saveCurrent()">保存</button>
+<button onclick="loadCurrent()">読み込み</button>
+<button onclick="deleteCurrent()">削除</button>
+
+<hr>
+
+<h3>モジュール登録</h3>
+<select id="linkType">
+<option>敏捷強化</option>
+<option>特攻ダメージ強化</option>
+<option>集中攻撃速度</option>
+</select>
+
+<input type="number" id="linkValue" placeholder="1〜10" min="1" max="10">
+
+<button onclick="addModule()">追加</button>
+
+<div id="moduleList"></div>
+
+<hr>
+
+<h3>検索</h3>
+<select id="priority">
+<option>敏捷強化</option>
+<option>特攻ダメージ強化</option>
+<option>集中攻撃速度</option>
+</select>
+
+<button onclick="calculate()">計算</button>
+
+<div id="results"></div>
+
+<script>
+let modules = JSON.parse(localStorage.getItem("modules")) || [];
+let saves = JSON.parse(localStorage.getItem("moduleSaves")) || {};
+
+function save(){
+  localStorage.setItem("modules", JSON.stringify(modules));
+}
+
+function render(){
+  const list=document.getElementById("moduleList");
+  list.innerHTML="";
+  modules.forEach((m,i)=>{
+    list.innerHTML+=`<div class="card">${m.type}+${m.value}
+    <button onclick="removeModule(${i})">削除</button></div>`;
+  });
+}
+
+function addModule(){
+  const type=document.getElementById("linkType").value;
+  const value=parseInt(document.getElementById("linkValue").value);
+  if(!value||value<1||value>10){alert("1〜10で入力");return;}
+  modules.push({type,value});
+  save();
+  render();
+}
+
+function removeModule(i){
+  modules.splice(i,1);
+  save();
+  render();
+}
+
+function getLevel(total){
+  if(total>=20)return 6;
+  if(total>=16)return 5;
+  if(total>=12)return 4;
+  if(total>=8)return 3;
+  if(total>=4)return 2;
+  if(total>=1)return 1;
+  return 0;
+}
+
+function calculate(){
+  const priority=document.getElementById("priority").value;
+  let results=[];
+  for(let i=0;i<modules.length;i++){
+    for(let j=i+1;j<modules.length;j++){
+      for(let k=j+1;k<modules.length;k++){
+        for(let l=k+1;l<modules.length;l++){
+          let combo=[modules[i],modules[j],modules[k],modules[l]];
+          let totals={};
+          combo.forEach(m=>{
+            totals[m.type]=(totals[m.type]||0)+m.value;
+          });
+          if(getLevel(totals[priority])==6){
+            let lv6count=0;
+            Object.values(totals).forEach(t=>{
+              if(getLevel(t)==6)lv6count++;
+            });
+            results.push({combo,lv6count});
+          }
+        }
+      }
+    }
+  }
+  results.sort((a,b)=>b.lv6count-a.lv6count);
+  results=results.slice(0,50);
+
+  const div=document.getElementById("results");
+  div.innerHTML="";
+  results.forEach(r=>{
+    div.innerHTML+=`<div class="card">
+    LV6数:${r.lv6count}<br>
+    ${r.combo.map(m=>m.type+"+"+m.value).join("<br>")}
+    </div>`;
+  });
+}
+
+function refreshSaveList(){
+  const select=document.getElementById("saveSlots");
+  select.innerHTML="";
+  Object.keys(saves).forEach(name=>{
+    let o=document.createElement("option");
+    o.text=name;
+    select.add(o);
+  });
+}
+
+function saveCurrent(){
+  const name=document.getElementById("saveName").value.trim();
+  if(!name){alert("保存名入力");return;}
+  saves[name]=modules;
+  localStorage.setItem("moduleSaves",JSON.stringify(saves));
+  refreshSaveList();
+}
+
+function loadCurrent(){
+  const name=document.getElementById("saveSlots").value;
+  if(!name)return;
+  modules=saves[name];
+  save();
+  render();
+}
+
+function deleteCurrent(){
+  const name=document.getElementById("saveSlots").value;
+  delete saves[name];
+  localStorage.setItem("moduleSaves",JSON.stringify(saves));
+  refreshSaveList();
+}
+
+refreshSaveList();
+render();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js');
+}
+</script>
+
+</body>
+</html>
