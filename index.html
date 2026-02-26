@@ -1,172 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Starezo Module App</title>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<style>
+body{font-family:sans-serif;margin:20px;}
+button{padding:8px 12px;margin:5px;}
+</style>
+</head>
+
+<body>
+
+<h2>モジュール登録</h2>
+
+<input type="file" id="imageInput" accept="image/*" style="display:none">
+
+<button onclick="document.getElementById('imageInput').click()">
+📷 スクショから自動登録
+</button>
+
+<div id="moduleList"></div>
+
+<script>
+
+// ===== 既存データ =====
+let modules = JSON.parse(localStorage.getItem("modules")||"[]");
+
+const linkTypes = [
+"極適応力","筋力強化","知力強化","敏捷強化","HP増強",
+"攻撃強化","会心強化","攻撃速度","詠唱速度","回復強化",
+"耐性増強","吸収強化","幸運強化","打撃強化","精鋭強化",
+"集中強化","防御強化","属性強化","HP吸収","MP吸収",
+"極集中力"
+];
+
+// ===== 保存系 =====
+function save(){
+localStorage.setItem("modules",JSON.stringify(modules));
+}
+
+function render(){
+const list=document.getElementById("moduleList");
+list.innerHTML="";
+modules.forEach((m,i)=>{
+const div=document.createElement("div");
+div.textContent=JSON.stringify(m.links);
+list.appendChild(div);
+});
+}
+
+function makeKey(links){
+return links
+.slice()
+.sort((a,b)=>a.name.localeCompare(b.name))
+.map(l=>l.name+":"+l.value)
+.join("|");
+}
+
+render();
+
+// ===== OCR登録 =====
+document.getElementById("imageInput").addEventListener("change",e=>{
+if(e.target.files[0]) readFromImage(e.target.files[0]);
+});
+
 async function readFromImage(file){
 
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-  await img.decode();
+const img=new Image();
+img.src=URL.createObjectURL(file);
+await img.decode();
 
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
+const canvas=document.createElement("canvas");
+const ctx=canvas.getContext("2d");
+canvas.width=img.width;
+canvas.height=img.height;
+ctx.drawImage(img,0,0);
 
-  canvas.width = img.width;
-  canvas.height = img.height;
-  ctx.drawImage(img,0,0);
-
-  // ===== ① 右パネル自動検出 =====
-  const data = ctx.getImageData(0,0,canvas.width,canvas.height).data;
-
-  let columnBrightness = [];
-  for(let x=0;x<canvas.width;x++){
-    let sum = 0;
-    for(let y=0;y<canvas.height;y+=20){
-      let i = (y*canvas.width + x)*4;
-      sum += data[i] + data[i+1] + data[i+2];
-    }
-    columnBrightness.push(sum);
-  }
-
-  let split = columnBrightness.findIndex(v => v < columnBrightness[0]*0.7);
-  if(split < 0) split = Math.floor(canvas.width*0.55);
-
-  const panelWidth = canvas.width - split;
-  const panelHeight = canvas.height * 0.6;
-  const panelY = canvas.height * 0.2;
-
-  const panelCanvas = document.createElement("canvas");
-  const pctx = panelCanvas.getContext("2d");
-
-  panelCanvas.width = panelWidth;
-  panelCanvas.height = panelHeight;
-
-  pctx.drawImage(
-    canvas,
-    split, panelY,
-    panelWidth, panelHeight,
-    0,0,
-    panelWidth, panelHeight
-  );
-
-  // ===== ② 3行分割 =====
-  const rowHeight = panelHeight / 3;
-  let links = [];
-
-  for(let r=0;r<3;r++){
-
-    const rowCanvas = document.createElement("canvas");
-    const rctx = rowCanvas.getContext("2d");
-
-    rowCanvas.width = panelWidth;
-    rowCanvas.height = rowHeight;
-
-    rctx.drawImage(
-      panelCanvas,
-      0, r*rowHeight,
-      panelWidth, rowHeight,
-      0,0,
-      panelWidth,rowHeight
-    );
-
-    // ===== ③ バー本数カウント =====
-    const rowData = rctx.getImageData(0,0,rowCanvas.width,rowCanvas.height).data;
-
-    let barCount = 0;
-    let inBar = false;
-
-    for(let x=0;x<rowCanvas.width;x++){
-      let bluePixels = 0;
-
-      for(let y=0;y<rowCanvas.height;y+=5){
-        let i = (y*rowCanvas.width + x)*4;
-        let rC = rowData[i];
-        let gC = rowData[i+1];
-        let bC = rowData[i+2];
-
-        // 水色っぽい色判定
-        if(bC > 150 && gC > 120 && rC < 120){
-          bluePixels++;
-        }
-      }
-
-      if(bluePixels > 5){
-        if(!inBar){
-          barCount++;
-          inBar = true;
-        }
-      }else{
-        inBar = false;
-      }
-    }
-
-    // ===== ④ テキスト部分だけOCR =====
-    const textCanvas = document.createElement("canvas");
-    const tctx = textCanvas.getContext("2d");
-
-    textCanvas.width = rowCanvas.width * 0.6;
-    textCanvas.height = rowCanvas.height;
-
-    tctx.drawImage(
-      rowCanvas,
-      0,0,
-      textCanvas.width,rowCanvas.height,
-      0,0,
-      textCanvas.width,rowCanvas.height
-    );
-
-    const result = await Tesseract.recognize(
-      textCanvas,
-      'jpn',
-      {
-        tessedit_pageseg_mode: 7,
-        tessedit_char_whitelist:
-          "極集中精鋭筋力知力敏捷HP吸収幸運打撃強化会心攻撃速度詠唱回復耐性増強・"
-      }
-    );
-
-    let rawText = result.data.text.trim();
-
-    // ===== ⑤ 辞書マッチ =====
-    function normalize(str){
-      return str.replace(/[・\s]/g,"");
-    }
-
-    const cleaned = normalize(rawText);
-
-    let best = null;
-    let bestScore = 0;
-
-    linkTypes.forEach(type=>{
-      const target = normalize(type);
-      let score = 0;
-      for(let i=0;i<Math.min(cleaned.length,target.length);i++){
-        if(cleaned[i] === target[i]) score++;
-      }
-      score = score / target.length;
-
-      if(score > bestScore){
-        bestScore = score;
-        best = type;
-      }
-    });
-
-    if(best && barCount > 0){
-      links.push({name: best, value: barCount});
-    }
-  }
-
-  if(links.length === 0){
-    alert("読み取り失敗");
-    return;
-  }
-
-  // ===== ⑥ 重複確認 =====
-  const key = makeKey(links);
-  const exists = modules.some(m => makeKey(m.links) === key);
-
-  if(exists){
-    const ok = confirm("同じモジュールが既に登録されています。\nそれでも登録しますか？");
-    if(!ok) return;
-  }
-
-  modules.push({links});
-  save();
-  render();
+// 右パネル検出
+const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+let columnBrightness=[];
+for(let x=0;x<canvas.width;x++){
+let sum=0;
+for(let y=0;y<canvas.height;y+=20){
+let i=(y*canvas.width+x)*4;
+sum+=data[i]+data[i+1]+data[i+2];
 }
+columnBrightness.push(sum);
+}
+let split=columnBrightness.findIndex(v=>v<columnBrightness[0]*0.7);
+if(split<0) split=Math.floor(canvas.width*0.55);
+
+const panelWidth=canvas.width-split;
+const panelHeight=canvas.height*0.6;
+const panelY=canvas.height*0.2;
+
+const panelCanvas=document.createElement("canvas");
+const pctx=panelCanvas.getContext("2d");
+panelCanvas.width=panelWidth;
+panelCanvas.height=panelHeight;
+
+pctx.drawImage(canvas,split,panelY,panelWidth,panelHeight,0,0,panelWidth,panelHeight);
+
+// 3行分割
+const rowHeight=panelHeight/3;
+let links=[];
+
+for(let r=0;r<3;r++){
+
+const rowCanvas=document.createElement("canvas");
+const rctx=rowCanvas.getContext("2d");
+rowCanvas.width=panelWidth;
+rowCanvas.height=rowHeight;
+
+rctx.drawImage(panelCanvas,0,r*rowHeight,panelWidth,rowHeight,0,0,panelWidth,rowHeight);
+
+// バーカウント
+const rowData=rctx.getImageData(0,0,rowCanvas.width,rowCanvas.height).data;
+let barCount=0;
+let inBar=false;
+
+for(let x=0;x<rowCanvas.width;x++){
+let bluePixels=0;
+for(let y=0;y<rowCanvas.height;y+=5){
+let i=(y*rowCanvas.width+x)*4;
+let rC=rowData[i];
+let gC=rowData[i+1];
+let bC=rowData[i+2];
+if(bC>150&&gC>120&&rC<120) bluePixels++;
+}
+if(bluePixels>5){
+if(!inBar){barCount++;inBar=true;}
+}else inBar=false;
+}
+
+// テキスト領域
+const textCanvas=document.createElement("canvas");
+const tctx=textCanvas.getContext("2d");
+textCanvas.width=rowCanvas.width*0.6;
+textCanvas.height=rowCanvas.height;
+tctx.drawImage(rowCanvas,0,0,textCanvas.width,rowCanvas.height,0,0,textCanvas.width,rowCanvas.height);
+
+// 二値化
+const imgData=tctx.getImageData(0,0,textCanvas.width,textCanvas.height);
+const d=imgData.data;
+for(let i=0;i<d.length;i+=4){
+const gray=0.3*d[i]+0.59*d[i+1]+0.11*d[i+2];
+const v=gray>150?255:0;
+d[i]=d[i+1]=d[i+2]=v;
+}
+tctx.putImageData(imgData,0,0);
+
+// OCR
+const result=await Tesseract.recognize(textCanvas,'jpn',{
+tessedit_pageseg_mode:7
+});
+
+let raw=result.data.text.replace(/[・\s]/g,"");
+
+// 辞書マッチ
+function similarity(a,b){
+let match=0;
+for(let i=0;i<Math.min(a.length,b.length);i++){
+if(a[i]===b[i]) match++;
+}
+return match/Math.max(a.length,b.length);
+}
+
+let best=null;
+let bestScore=0;
+
+linkTypes.forEach(type=>{
+const score=similarity(raw,type);
+if(score>bestScore){
+bestScore=score;
+best=type;
+}
+});
+
+if(best && bestScore>0.6 && barCount>0){
+links.push({name:best,value:barCount});
+}
+
+}
+
+if(links.length===0){
+alert("読み取り失敗");
+return;
+}
+
+// 重複確認
+const key=makeKey(links);
+const exists=modules.some(m=>makeKey(m.links)===key);
+
+if(exists){
+if(!confirm("同じモジュールが既に登録されています。\n登録しますか？"))
+return;
+}
+
+modules.push({links});
+save();
+render();
+
+alert("登録完了");
+
+}
+
+</script>
+</body>
+</html>
