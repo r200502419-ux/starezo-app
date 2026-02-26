@@ -1,197 +1,172 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>スタレゾモジュール計算機</title>
+async function readFromImage(file){
 
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#111111">
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
 
-<style>
-body{font-family:sans-serif;background:#111;color:#fff;padding:10px}
-input,select,button{font-size:16px;margin:4px 0;padding:6px}
-button{background:#2196f3;border:none;color:#fff;border-radius:6px}
-.card{background:#222;padding:8px;margin:6px 0;border-radius:8px}
-.small{font-size:13px;color:#aaa}
-</style>
-</head>
-<body>
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
 
-<h2>スタレゾモジュール計算機</h2>
+  canvas.width = img.width;
+  canvas.height = img.height;
+  ctx.drawImage(img,0,0);
 
-<h3>セーブデータ</h3>
-<select id="saveSlots"></select><br>
-<input type="text" id="saveName" placeholder="保存名">
-<button onclick="saveCurrent()">保存</button>
-<button onclick="loadCurrent()">読込</button>
-<button onclick="deleteCurrent()">削除</button>
+  // ===== ① 右パネル自動検出 =====
+  const data = ctx.getImageData(0,0,canvas.width,canvas.height).data;
 
-<hr>
-
-<h3>モジュール登録（最大100）</h3>
-
-<div id="moduleInputs"></div>
-<button onclick="addLinkInput()">リンク追加</button>
-<button onclick="addModule()">モジュール登録</button>
-
-<div id="moduleList"></div>
-
-<hr>
-
-<h3>検索</h3>
-<select id="priority"></select>
-<button onclick="calculate()">計算</button>
-
-<div id="results"></div>
-
-<script>
-const linkTypes=[
-"敏捷強化",
-"特攻ダメージ強化",
-"集中攻撃速度"
-];
-
-let modules=JSON.parse(localStorage.getItem("modules"))||[];
-let saves=JSON.parse(localStorage.getItem("moduleSaves"))||{};
-
-function init(){
-  const p=document.getElementById("priority");
-  linkTypes.forEach(l=>{
-    let o=document.createElement("option");
-    o.text=l;
-    p.add(o);
-  });
-  addLinkInput();
-  render();
-  refreshSaveList();
-}
-function save(){localStorage.setItem("modules",JSON.stringify(modules));}
-
-function addLinkInput(){
-  const div=document.createElement("div");
-  div.className="card";
-  div.innerHTML=`
-<select class="ltype">
-${linkTypes.map(l=>`<option>${l}</option>`).join("")}
-</select>
-<input type="number" class="lval" min="1" max="10" placeholder="1-10">
-`;
-  document.getElementById("moduleInputs").appendChild(div);
-}
-
-function addModule(){
-  if(modules.length>=100){alert("100個まで");return;}
-  const inputs=document.querySelectorAll("#moduleInputs .card");
-  let links=[];
-  inputs.forEach(c=>{
-    const type=c.querySelector(".ltype").value;
-    const val=parseInt(c.querySelector(".lval").value);
-    if(val && val>=1 && val<=10){
-      links.push({type,value:val});
+  let columnBrightness = [];
+  for(let x=0;x<canvas.width;x++){
+    let sum = 0;
+    for(let y=0;y<canvas.height;y+=20){
+      let i = (y*canvas.width + x)*4;
+      sum += data[i] + data[i+1] + data[i+2];
     }
-  });
-  if(links.length<2||links.length>3){alert("2〜3リンク必要");return;}
-  modules.push(links);
-  save();
-  render();
-  document.getElementById("moduleInputs").innerHTML="";
-  addLinkInput();
-}
+    columnBrightness.push(sum);
+  }
 
-function render(){
-  const list=document.getElementById("moduleList");
-  list.innerHTML="";
-  modules.forEach((m,i)=>{
-    list.innerHTML+=`<div class="card">
-${m.map(l=>l.type+"+"+l.value).join("<br>")}
-<br><button onclick="removeModule(${i})">削除</button>
-</div>`;
-  });
-}
+  let split = columnBrightness.findIndex(v => v < columnBrightness[0]*0.7);
+  if(split < 0) split = Math.floor(canvas.width*0.55);
 
-function removeModule(i){
-  modules.splice(i,1);
-  save();render();
-}
+  const panelWidth = canvas.width - split;
+  const panelHeight = canvas.height * 0.6;
+  const panelY = canvas.height * 0.2;
 
-function getLevel(t){
-  if(t>=20)return 6;
-  if(t>=16)return 5;
-  if(t>=12)return 4;
-  if(t>=8)return 3;
-  if(t>=4)return 2;
-  if(t>=1)return 1;
-  return 0;
-}
+  const panelCanvas = document.createElement("canvas");
+  const pctx = panelCanvas.getContext("2d");
 
-function calculate(){
-  const priority=document.getElementById("priority").value;
-  let results=[];
-  for(let i=0;i<modules.length;i++)
-  for(let j=i+1;j<modules.length;j++)
-  for(let k=j+1;k<modules.length;k++)
-  for(let l=k+1;l<modules.length;l++){
-    let combo=[modules[i],modules[j],modules[k],modules[l]];
-    let totals={};
-    combo.flat().forEach(link=>{
-      totals[link.type]=(totals[link.type]||0)+link.value;
+  panelCanvas.width = panelWidth;
+  panelCanvas.height = panelHeight;
+
+  pctx.drawImage(
+    canvas,
+    split, panelY,
+    panelWidth, panelHeight,
+    0,0,
+    panelWidth, panelHeight
+  );
+
+  // ===== ② 3行分割 =====
+  const rowHeight = panelHeight / 3;
+  let links = [];
+
+  for(let r=0;r<3;r++){
+
+    const rowCanvas = document.createElement("canvas");
+    const rctx = rowCanvas.getContext("2d");
+
+    rowCanvas.width = panelWidth;
+    rowCanvas.height = rowHeight;
+
+    rctx.drawImage(
+      panelCanvas,
+      0, r*rowHeight,
+      panelWidth, rowHeight,
+      0,0,
+      panelWidth,rowHeight
+    );
+
+    // ===== ③ バー本数カウント =====
+    const rowData = rctx.getImageData(0,0,rowCanvas.width,rowCanvas.height).data;
+
+    let barCount = 0;
+    let inBar = false;
+
+    for(let x=0;x<rowCanvas.width;x++){
+      let bluePixels = 0;
+
+      for(let y=0;y<rowCanvas.height;y+=5){
+        let i = (y*rowCanvas.width + x)*4;
+        let rC = rowData[i];
+        let gC = rowData[i+1];
+        let bC = rowData[i+2];
+
+        // 水色っぽい色判定
+        if(bC > 150 && gC > 120 && rC < 120){
+          bluePixels++;
+        }
+      }
+
+      if(bluePixels > 5){
+        if(!inBar){
+          barCount++;
+          inBar = true;
+        }
+      }else{
+        inBar = false;
+      }
+    }
+
+    // ===== ④ テキスト部分だけOCR =====
+    const textCanvas = document.createElement("canvas");
+    const tctx = textCanvas.getContext("2d");
+
+    textCanvas.width = rowCanvas.width * 0.6;
+    textCanvas.height = rowCanvas.height;
+
+    tctx.drawImage(
+      rowCanvas,
+      0,0,
+      textCanvas.width,rowCanvas.height,
+      0,0,
+      textCanvas.width,rowCanvas.height
+    );
+
+    const result = await Tesseract.recognize(
+      textCanvas,
+      'jpn',
+      {
+        tessedit_pageseg_mode: 7,
+        tessedit_char_whitelist:
+          "極集中精鋭筋力知力敏捷HP吸収幸運打撃強化会心攻撃速度詠唱回復耐性増強・"
+      }
+    );
+
+    let rawText = result.data.text.trim();
+
+    // ===== ⑤ 辞書マッチ =====
+    function normalize(str){
+      return str.replace(/[・\s]/g,"");
+    }
+
+    const cleaned = normalize(rawText);
+
+    let best = null;
+    let bestScore = 0;
+
+    linkTypes.forEach(type=>{
+      const target = normalize(type);
+      let score = 0;
+      for(let i=0;i<Math.min(cleaned.length,target.length);i++){
+        if(cleaned[i] === target[i]) score++;
+      }
+      score = score / target.length;
+
+      if(score > bestScore){
+        bestScore = score;
+        best = type;
+      }
     });
-    if(getLevel(totals[priority]||0)==6){
-      let lv6count=0;
-      Object.values(totals).forEach(t=>{
-        if(getLevel(t)==6)lv6count++;
-      });
-      results.push({combo,lv6count});
+
+    if(best && barCount > 0){
+      links.push({name: best, value: barCount});
     }
   }
-  results.sort((a,b)=>b.lv6count-a.lv6count);
-  results=results.slice(0,50);
 
-  const div=document.getElementById("results");
-  div.innerHTML="";
-  results.forEach(r=>{
-    div.innerHTML+=`<div class="card">
-LV6数:${r.lv6count}<br>
-${r.combo.map(m=>m.map(l=>l.type+"+"+l.value).join(", ")).join("<br>")}
-</div>`;
-  });
-}
+  if(links.length === 0){
+    alert("読み取り失敗");
+    return;
+  }
 
-function refreshSaveList(){
-  const s=document.getElementById("saveSlots");
-  s.innerHTML="";
-  Object.keys(saves).forEach(n=>{
-    let o=document.createElement("option");
-    o.text=n;s.add(o);
-  });
-}
-function saveCurrent(){
-  const n=document.getElementById("saveName").value.trim();
-  if(!n)return;
-  saves[n]=modules;
-  localStorage.setItem("moduleSaves",JSON.stringify(saves));
-  refreshSaveList();
-}
-function loadCurrent(){
-  const n=document.getElementById("saveSlots").value;
-  if(!n)return;
-  modules=saves[n];
-  save();render();
-}
-function deleteCurrent(){
-  const n=document.getElementById("saveSlots").value;
-  delete saves[n];
-  localStorage.setItem("moduleSaves",JSON.stringify(saves));
-  refreshSaveList();
-}
+  // ===== ⑥ 重複確認 =====
+  const key = makeKey(links);
+  const exists = modules.some(m => makeKey(m.links) === key);
 
-init();
+  if(exists){
+    const ok = confirm("同じモジュールが既に登録されています。\nそれでも登録しますか？");
+    if(!ok) return;
+  }
 
-if('serviceWorker'in navigator){
- navigator.serviceWorker.register('service-worker.js');
+  modules.push({links});
+  save();
+  render();
 }
-</script>
-
-</body>
-</html>
